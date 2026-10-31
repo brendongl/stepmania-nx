@@ -114,6 +114,7 @@ MovieDecoder_FFMpeg::MovieDecoder_FFMpeg()
 	m_buffer = NULL;
 	m_fctx = nullptr;
 	m_pStream = nullptr;
+	m_pStreamCodec = nullptr; // Init() below frees it when non-null (FFmpeg >= 58): it was never initialised upstream
 	m_iCurrentPacketOffset = -1;
 	m_Frame = avcodec::av_frame_alloc();
 
@@ -273,7 +274,11 @@ int MovieDecoder_FFMpeg::DecodePacket( float fTargetTime )
 		bool bSkipThisFrame =
 			fTargetTime != -1 &&
 			GetTimestamp() + GetFrameDuration() < fTargetTime &&
+#if LIBAVCODEC_VERSION_MAJOR >= 61
+			(m_pStreamCodec->frame_num % 2) == 0;
+#else
 			(m_pStreamCodec->frame_number % 2) == 0;
+#endif
 
 		int iGotFrame;
 		int len;
@@ -405,7 +410,7 @@ void MovieTexture_FFMpeg::RegisterProtocols()
 		return;
 	Done = true;
 
-#if !FF_API_NEXT
+#if LIBAVCODEC_VERSION_MAJOR < 58
 	avcodec::avcodec_register_all();
 	avcodec::av_register_all();
 #endif
@@ -455,9 +460,16 @@ RString MovieDecoder_FFMpeg::Open( RString sFile )
 	m_buffer = (unsigned char *)avcodec::av_malloc(STEPMANIA_FFMPEG_BUFFER_SIZE);
 	m_avioContext = avcodec::avio_alloc_context(m_buffer, STEPMANIA_FFMPEG_BUFFER_SIZE, 0, f, AVIORageFile_ReadPacket, nullptr, AVIORageFile_Seek);
 	m_fctx->pb = m_avioContext;
+	/* Tell ffmpeg the pb is ours: without this, avformat_open_input() frees our AVIOContext as if it were
+	 * a URLContext when the open fails (e.g. a network video that stopped answering), corrupting the heap. */
+	m_fctx->flags |= AVFMT_FLAG_CUSTOM_IO;
 	int ret = avcodec::avformat_open_input( &m_fctx, sFile.c_str(), nullptr, nullptr );
 	if( ret < 0 )
+	{
+		/* On failure ffmpeg has already freed m_fctx and set it to nullptr; m_avioContext and the
+		 * RageFile are still ours and get released in Close()/the destructor. */
 		return RString( averr_ssprintf(ret, "AVCodec: Couldn't open \"%s\"", sFile.c_str()) );
+	}
 
 	ret = avcodec::avformat_find_stream_info( m_fctx, nullptr );
 	if( ret < 0 )
@@ -508,7 +520,7 @@ RString MovieDecoder_FFMpeg::OpenCodec()
 	if( m_pStreamCodec && m_pStreamCodec->codec )
 		avcodec::avcodec_close( m_pStreamCodec );
 
-	avcodec::AVCodec *pCodec = avcodec::avcodec_find_decoder( m_pStreamCodec->codec_id );
+	const avcodec::AVCodec *pCodec = avcodec::avcodec_find_decoder( m_pStreamCodec->codec_id );
 	if( pCodec == nullptr ) {
 		const avcodec::AVCodecDescriptor* pDesc = avcodec_descriptor_get(m_pStreamCodec->codec_id );
 		return ssprintf( "Couldn't find decoder [%i-%s] %s", m_pStreamCodec->codec_id, pDesc ? pDesc->name : "?", pDesc ? pDesc->long_name : "?" );
@@ -537,7 +549,11 @@ void MovieDecoder_FFMpeg::Close()
 {
 	if( m_pStream && m_pStreamCodec && m_pStreamCodec->codec )
 	{
+#if LIBAVCODEC_VERSION_MAJOR >= 61
+		avcodec::avcodec_free_context( &m_pStreamCodec ); // avcodec_close() is gone in FFmpeg 7
+#else
 		avcodec::avcodec_close( m_pStreamCodec );
+#endif
 		m_pStream = nullptr;
 	}
 

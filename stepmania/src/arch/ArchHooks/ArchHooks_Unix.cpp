@@ -431,6 +431,27 @@ void ArchHooks::MountInitialFilesystems( const RString &sDirOfExecutable )
 #endif
 
 	FILEMAN->Mount( "dir", Root, "/" );
+
+#if defined(__SWITCH__)
+	/* Sip n Play network video: Save/video-server.txt holds "http://host:port/base/". The server's
+	 * manifest lists song videos that live on the network instead of the SD card; they overlay /Songs. */
+	{
+		RString sCfg = Root + "/Save/video-server.txt";
+		FILE *f = fopen( sCfg.c_str(), "r" );
+		if( f != nullptr )
+		{
+			char line[512] = "";
+			if( fgets(line, sizeof(line), f) != nullptr )
+			{
+				RString sUrl = line;
+				Trim( sUrl );
+				if( sUrl.compare(0, 7, "http://") == 0 )
+					FILEMAN->Mount( "http", sUrl, "/Songs" );
+			}
+			fclose( f );
+		}
+	}
+#endif
 }
 
 void ArchHooks::MountUserFilesystems( const RString &sDirOfExecutable )

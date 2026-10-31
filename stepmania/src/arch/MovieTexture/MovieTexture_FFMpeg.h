@@ -11,6 +11,7 @@ namespace avcodec
 	extern "C"
 	{
 		#include <libavformat/avformat.h>
+		#include <libavcodec/avcodec.h> /* FFmpeg >= 5: avformat.h no longer pulls this in */
 		#include <libswscale/swscale.h>
 		#include <libavutil/pixdesc.h>
 

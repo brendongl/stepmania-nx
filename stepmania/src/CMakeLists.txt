@@ -659,6 +659,7 @@ if(SWITCH_LIBNX)
     "z"
     "opus"
     "vpx"
+    "dav1d"
     "swresample"
     "png"
     "EGL"
